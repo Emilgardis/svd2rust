@@ -134,10 +134,16 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 [[package]]
 name = "svd-parser"
 version = "0.5.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
 dependencies = [
+ "error-chain 0.10.0 (registry+https://github.com/rust-lang/crates.io-index)",
  "xmltree 0.3.2 (registry+https://github.com/rust-lang/crates.io-index)",
 ]
+
+[[package]]
+name = "svd-parser"
+version = "0.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+replace = "svd-parser 0.5.1"
 
 [[package]]
 name = "syn"

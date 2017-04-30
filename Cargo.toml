@@ -18,3 +18,6 @@ inflections = "1.0.0"
 quote = "0.3.15"
 svd-parser = "0.5.1"
 syn = "0.11.9"
+
+[replace]
+"svd-parser:0.5.1" = {git = "https://github.com/Emilgardis/svd", branch = "derived_registers"}
