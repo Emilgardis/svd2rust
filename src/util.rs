@@ -116,6 +116,7 @@ pub fn respace(s: &str) -> String {
 }
 
 pub struct ExpandedRegister<'a> {
+    pub register: &'a Register,
     pub info: &'a RegisterInfo,
     pub name: String,
     pub offset: u32,
@@ -133,6 +134,7 @@ pub fn expand(registers: &[Register]) -> Vec<ExpandedRegister> {
             Register::Single(ref info) => {
                 out.push(
                     ExpandedRegister {
+                        register: r,
                         info: info,
                         name: info.name.to_sanitized_snake_case().into_owned(),
                         offset: info.address_offset,
@@ -181,6 +183,7 @@ pub fn expand(registers: &[Register]) -> Vec<ExpandedRegister> {
 
                     out.push(
                         ExpandedRegister {
+                            register: r,
                             info: info,
                             name: name.to_sanitized_snake_case().into_owned(),
                             offset: offset,
@@ -210,11 +213,19 @@ pub fn name_of(register: &Register) -> Cow<str> {
     }
 }
 
-pub fn access_of(register: &Register) -> Access {
+// FIXME: Highly unlikely but if the register itself has extended on the base,
+//        the fields can be different.
+pub fn access_of(register: &Register, base: Option<&Register>) -> Access {
     register
         .access
-        .unwrap_or_else(
-            || if let Some(ref fields) = register.fields {
+        .or(base.and_then(|b| b.access))
+        .unwrap_or_else(|| {
+                let bf = base.as_ref().and_then(|b| b.fields.clone());
+                let empty = vec![];
+                let fields: Vec<&Field> = register.fields.as_ref().unwrap_or(&empty).iter().chain(bf.iter().flat_map(|v| v)).collect();
+                if fields.len() == 0 {
+                    return Access::ReadWrite
+                }
                 if fields.iter().all(|f| f.access == Some(Access::ReadOnly)) {
                     Access::ReadOnly
                 } else if fields
@@ -224,9 +235,7 @@ pub fn access_of(register: &Register) -> Access {
                 } else {
                     Access::ReadWrite
                 }
-            } else {
-                Access::ReadWrite
-            },
+            }
         )
 }
 
@@ -420,6 +429,58 @@ fn lookup_in_register<'r>
                         base_evs
                     ),
                 )?
+            }
+        }
+    }
+}
+
+
+pub fn lookup_register<'r>(base: &str, all_registers: &'r [Register]) -> Result<&'r Register> {
+    for register in all_registers {
+        if register.name == base {
+            return Ok(register);
+        }
+    }
+    Err(
+        format!(
+            "Register {} not found",
+            base,
+        ),
+    )?
+}
+
+// TODO: Take a Fn -> &'r T to enable
+//       lookup_parents(register, all_registers, |t| t.description)
+//       So we travel down until we get a Some(str)
+pub fn lookup_parent<'r>(register: &'r Register, all_registers: &'r [Register]) -> Result<&'r Register> {
+    match register.derived_from {
+        Some(ref base) if &register.name == base => {
+            Err( format!("Register {} derives from itself.", register.name))?
+        }
+        Some(ref base) => {
+            ::util::lookup_register(base, all_registers).chain_err(|| format!("While getting base for register {}", register.name))
+        }
+        None => {
+            Err( format!("Couldn't get base of register {}", register.name))?
+        }
+    }
+}
+
+pub fn description_of<'r>(register: &'r Register, base: Option<&'r Register>, all_registers: &'r [Register]) -> Result<&'r str> {
+    match register.description {
+        Some(ref desc) => {
+            Ok(&desc)
+        }
+        None => {
+            match base {
+                Some(ref base_register) => {
+                    ::util::description_of(base_register, ::util::lookup_parent(base_register, all_registers).ok(), all_registers).chain_err(|| format!("While getting description of register {}", base_register.name))
+                }
+                None => {
+                    Err(
+                        format!("Register {} has no description", register.name)
+                    )?
+                }
             }
         }
     }

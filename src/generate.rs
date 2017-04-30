@@ -68,7 +68,7 @@ pub fn device(d: &Device, items: &mut Vec<Tokens>) -> Result<()> {
             continue;
         }
 
-        ::generate::peripheral(p, items, &d.defaults)?;
+        ::generate::peripheral(p, items, &d.defaults).chain_err(|| format!("While generating peripheral {}", p.name))?;
     }
 
     Ok(())
@@ -285,10 +285,10 @@ pub fn peripheral(
     }
 
     let mut mod_items = vec![];
-    mod_items.push(::generate::register_block(registers, defaults)?);
+    mod_items.push(::generate::register_block(registers, defaults).chain_err(|| "While generating register block")?);
 
     for register in registers {
-        ::generate::register(register, registers, p, defaults, &mut mod_items)?;
+        ::generate::register(register, registers, p, defaults, &mut mod_items).chain_err(|| format!("While generating register {}", register.name))?;
     }
 
     let name_sc = Ident::new(&*p.name.to_sanitized_snake_case());
@@ -349,11 +349,20 @@ fn register_block(registers: &[Register], defs: &Defaults) -> Result<Tokens> {
             );
             i += 1;
         }
-
+        let base = if register.register.derived_from.is_some() {
+            Some(::util::lookup_parent(register.register, registers).chain_err(|| format!("While getting base of {}", register.name))?)
+        } else {
+            None
+        };
         let comment = &format!(
             "0x{:02x} - {}",
             register.offset,
-            util::respace(&register.info.description)
+            util::respace(
+                ::util::description_of(register.register,
+                    base,
+                    registers
+                )?
+            )
         )
                            [..];
 
@@ -368,11 +377,12 @@ fn register_block(registers: &[Register], defs: &Defaults) -> Result<Tokens> {
                 pub #reg_name : #rty,
             },
         );
-
+        
         offset = register.offset +
                  register
                      .info
                      .size
+                     .or(util::lookup_parent(register.register, registers).ok().and_then(|p| p.size))
                      .or(defs.size)
                      .ok_or_else(
             || {
@@ -411,19 +421,22 @@ pub fn register(
     defs: &Defaults,
     items: &mut Vec<Tokens>,
 ) -> Result<()> {
-    let access = util::access_of(register);
+    let base = ::util::lookup_parent(register, all_registers).ok();
+    let access = util::access_of(register, base);
     let name = util::name_of(register);
     let name_pc = Ident::new(&*name.to_sanitized_pascal_case());
     let name_sc = Ident::new(&*name.to_sanitized_snake_case());
     let rsize = register.size
+        .or(base.and_then(|p| p.size))
         .or(defs.size)
         .ok_or_else(|| {
                         format!("Register {} has no `size` field",
                                 register.name)
                     })?;
     let rty = rsize.to_ty()?;
-    let description = util::respace(&register.description);
 
+    let description = util::respace(::util::description_of(register, base, all_registers)?);
+    // FIXME: Base write constraint
     let unsafety = unsafety(register.write_constraint.as_ref(), rsize);
 
     let mut mod_items = vec![];
@@ -551,21 +564,22 @@ pub fn register(
             }
         },
     );
+    let bf = base.and_then(|b| b.fields.clone());
+    let empty = vec![];
+    let fields: Vec<Field> = register.fields.as_ref().unwrap_or(&empty).iter().chain(bf.iter().flat_map(|v| v)).cloned().collect();
 
-    if let Some(fields) = register.fields.as_ref() {
-        if !fields.is_empty() {
-            ::generate::fields(
-                fields,
-                register,
-                all_registers,
-                peripheral,
-                &rty,
-                access,
-                &mut mod_items,
-                &mut r_impl_items,
-                &mut w_impl_items,
-            )?;
-        }
+    if !fields.is_empty() {
+        ::generate::fields(
+            &fields,
+            register,
+            all_registers,
+            peripheral,
+            &rty,
+            access,
+            &mut mod_items,
+            &mut r_impl_items,
+            &mut w_impl_items,
+        )?;
     }
 
     if access == Access::ReadOnly || access == Access::ReadWrite {

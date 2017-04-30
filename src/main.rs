@@ -52,7 +52,7 @@ fn run() -> Result<()> {
     let device = svd::parse(xml);
 
     let mut items = vec![];
-    generate::device(&device, &mut items)?;
+    generate::device(&device?, &mut items)?;
 
     println!(
         "{}",
