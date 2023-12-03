@@ -1400,7 +1400,7 @@ fn add_from_variants<'a>(
     }
 
     let desc = if let Some(rv) = reset_value {
-        format!("{desc}\n\nValue on reset: {rv}")
+        format!("{desc}\n\nValue on reset if reset :): {rv}")
     } else {
         desc.to_string()
     };
